@@ -419,7 +419,10 @@ def transcribe_file(filepath, instrument, output_dir, formats, separate, title, 
 
     except Exception as e:
         progress.close()
+        import traceback
         print(f"\n  Error processing '{path.name}': {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        results['error'] = str(e)
 
     return results
 

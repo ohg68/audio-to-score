@@ -81,21 +81,33 @@ if uploaded and st.button('Transcribe', type='primary', use_container_width=True
             os.makedirs(output_dir)
 
             with st.spinner('Transcribing...'):
-                result = transcribe_file(
-                    filepath=input_path,
-                    instrument=instrument,
-                    output_dir=output_dir,
-                    formats=set(formats),
-                    separate=separate,
-                    title=custom_title or None,
-                    quiet=True,
-                    confidence_threshold=confidence,
-                    bpm_override=bpm_override,
-                )
+                import traceback, io
+                err_buf = io.StringIO()
+                try:
+                    result = transcribe_file(
+                        filepath=input_path,
+                        instrument=instrument,
+                        output_dir=output_dir,
+                        formats=set(formats),
+                        separate=separate,
+                        title=custom_title or None,
+                        quiet=True,
+                        confidence_threshold=confidence,
+                        bpm_override=bpm_override,
+                    )
+                except Exception as e:
+                    traceback.print_exc(file=err_buf)
+                    result = {'notes_detected': 0, 'error': str(e), 'traceback': err_buf.getvalue()}
 
             # --- Show results ---
             if result.get('notes_detected', 0) == 0:
-                st.warning('No notes detected. Try lowering the confidence threshold or enabling source separation.')
+                msg = 'No notes detected. Try lowering the confidence threshold or enabling source separation.'
+                if result.get('error'):
+                    msg = f"Error: {result['error']}"
+                st.warning(msg)
+                if result.get('traceback'):
+                    with st.expander('Error details'):
+                        st.code(result['traceback'])
             else:
                 st.success(f"Transcription complete — {result['notes_detected']} notes detected")
 
