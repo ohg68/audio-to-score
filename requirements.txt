@@ -1,6 +1,8 @@
 basic-pitch>=0.3.0
 onnxruntime>=1.15.0
 setuptools>=68.0.0
+torch>=2.0.0,<2.6.0
+torchaudio>=2.0.0,<2.6.0
 demucs>=4.0.0
 librosa>=0.10.0
 music21>=8.1.0
