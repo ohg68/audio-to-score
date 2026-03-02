@@ -1,4 +1,6 @@
 basic-pitch>=0.3.0
+onnxruntime>=1.15.0
+tflite-runtime>=2.14.0
 demucs>=4.0.0
 librosa>=0.10.0
 music21>=8.1.0
