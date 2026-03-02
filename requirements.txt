@@ -1,8 +1,9 @@
-basic-pitch>=0.3.0
-demucs>=4.0.0
+tensorflow==2.15.1
+basic-pitch==0.3.0
+demucs==4.0.1
 librosa>=0.10.0
 music21>=8.1.0
-numpy>=1.24.0
+numpy<2.0.0
 scipy>=1.10.0
 soundfile>=0.12.0
 pydub>=0.25.1
