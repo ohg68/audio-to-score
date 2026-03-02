@@ -248,11 +248,11 @@ class AudioProcessor:
 
     def separate_sources_dual(self, audio_data):
         """
-        Separate audio into vocals and accompaniment using Demucs Python API.
+        Separate audio into vocals and accompaniment using Demucs CLI.
 
         Returns both stems for independent processing in 'song' mode.
-        Uses the Python API directly (not CLI) to work around the PyTorch 2.x
-        in-place operation bug in demucs CLI.
+        Uses CLI (subprocess) to avoid importing torch in the main process,
+        which prevents circular import issues in Streamlit Cloud.
 
         Parameters
         ----------
@@ -272,62 +272,49 @@ class AudioProcessor:
                 "Install with: pip install demucs"
             )
 
-        try:
-            import torch
-            import torchaudio
-            from demucs.pretrained import get_model
-            from demucs.apply import apply_model
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write waveform to temp WAV for Demucs
+            tmp_wav = os.path.join(tmpdir, 'input.wav')
+            sf.write(tmp_wav, audio_data['waveform'], audio_data['sr'])
 
-            # Load the model
-            model = get_model('htdemucs')
-            model.eval()
+            # Run Demucs CLI with --two-stems vocals
+            # This produces both vocals.wav and no_vocals.wav
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable, '-m', 'demucs',
+                        '--two-stems', 'vocals',
+                        '-o', tmpdir,
+                        '-n', 'htdemucs',
+                        tmp_wav,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f"Demucs separation failed: {e.stderr.strip()}"
+                )
 
-            # Prepare audio tensor: (channels, samples)
-            waveform = audio_data['waveform']
-            sr = audio_data['sr']
+            # Find separated stems
+            # Demucs outputs to: <out_dir>/htdemucs/input/vocals.wav + no_vocals.wav
+            stem_dir = Path(tmpdir) / 'htdemucs' / 'input'
 
-            # Convert mono numpy to stereo torch tensor
-            wav_tensor = torch.from_numpy(waveform).float()
-            if wav_tensor.dim() == 1:
-                wav_tensor = wav_tensor.unsqueeze(0).repeat(2, 1)  # mono → stereo
+            vocals_file = stem_dir / 'vocals.wav'
+            no_vocals_file = stem_dir / 'no_vocals.wav'
 
-            # Resample to model's sample rate if needed
-            model_sr = model.samplerate
-            if sr != model_sr:
-                wav_tensor = torchaudio.functional.resample(wav_tensor, sr, model_sr)
+            if not vocals_file.exists() or not no_vocals_file.exists():
+                available = list(stem_dir.glob('*.wav')) if stem_dir.exists() else []
+                names = [f.stem for f in available]
+                raise RuntimeError(
+                    f"Demucs did not produce expected stems. "
+                    f"Available: {names}"
+                )
 
-            # Clone to avoid in-place operation bug in PyTorch 2.x
-            wav_tensor = wav_tensor.clone()
-
-            # Normalize (same as demucs CLI does)
-            ref = wav_tensor.mean(0)
-            wav_tensor = (wav_tensor - ref.mean()) / ref.std().clamp(min=1e-5)
-
-            # Add batch dimension: (1, channels, samples)
-            wav_tensor = wav_tensor.unsqueeze(0)
-
-            # Run inference
-            with torch.no_grad():
-                sources = apply_model(model, wav_tensor, progress=False)
-
-            # sources shape: (1, num_sources, channels, samples)
-            # htdemucs sources: drums, bass, other, vocals
-            source_names = model.sources
-            vocals_idx = source_names.index('vocals')
-
-            # Extract vocals (mono)
-            vocals_tensor = sources[0, vocals_idx].mean(0)  # stereo → mono
-            vocals_np = vocals_tensor.cpu().numpy()
-
-            # Accompaniment = sum of all non-vocal sources
-            non_vocal_indices = [i for i, name in enumerate(source_names) if name != 'vocals']
-            accomp_tensor = sources[0, non_vocal_indices].sum(0).mean(0)  # sum sources, stereo → mono
-            accomp_np = accomp_tensor.cpu().numpy()
-
-            # Resample back to target SR if needed
-            if model_sr != TARGET_SR:
-                vocals_np = librosa.resample(vocals_np, orig_sr=model_sr, target_sr=TARGET_SR)
-                accomp_np = librosa.resample(accomp_np, orig_sr=model_sr, target_sr=TARGET_SR)
+            # Load separated stems
+            vocals_np, _ = librosa.load(str(vocals_file), sr=TARGET_SR, mono=True)
+            accomp_np, _ = librosa.load(str(no_vocals_file), sr=TARGET_SR, mono=True)
 
             # Apply bandpass filters per stem
             vocals_np = self._bandpass_filter(vocals_np, TARGET_SR, 'voice')
@@ -342,9 +329,6 @@ class AudioProcessor:
                 'accompaniment': accomp_np,
                 'sr': TARGET_SR,
             }
-
-        except Exception as e:
-            raise RuntimeError(f"Demucs separation failed: {e}")
 
     def _check_demucs(self):
         """Check if Demucs is installed."""
