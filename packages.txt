@@ -1,0 +1,4 @@
+lilypond
+libsndfile1-dev
+ffmpeg
+libcairo2-dev
